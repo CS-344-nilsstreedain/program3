@@ -4,7 +4,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 #define MAX_CMD_LENGTH 2048
 #define MAX_ARGS 512
@@ -26,87 +28,6 @@ void expandPid(char* str) {
 	}
 }
 
-
-//void executeCommand(char** args, int argCount, int* status, int* background) {
-//	int childStatus;
-//	pid_t spawnPid = -5;
-//
-//	if (strcmp(args[0], "exit") == 0) {
-//		exit(0);
-//	} else if (strcmp(args[0], "cd") == 0) {
-//		if (argCount > 1) {
-//			chdir(args[1]);
-//		} else {
-//			chdir(getenv("HOME"));
-//		}
-//		*status = 0;
-//	} else if (strcmp(args[0], "status") == 0) {
-//		printf("exit value %d\n", *status);
-//		*status = 0;
-//	} else {
-//		spawnPid = fork();
-//		switch (spawnPid) {
-//			case -1:
-//				perror("fork() failed!");
-//				exit(1);
-//				break;
-//			case 0:
-//				// child process
-//				if (*background == 1) {
-//					freopen("/dev/null", "w", stdout);
-//					freopen("/dev/null", "w", stderr);
-//				}
-//
-//				if (execvp(args[0], args) < 0) {
-//					printf("%s: no such file or directory\n", args[0]);
-//					fflush(stdout);
-//					exit(1);
-//				}
-//				break;
-//			default:
-//				// parent process
-//				if (*background == 0) {
-//					spawnPid = waitpid(spawnPid, &childStatus, 0);
-//					if (WIFEXITED(childStatus)) {
-//						*status = WEXITSTATUS(childStatus);
-//					} else if (WIFSIGNALED(childStatus)) {
-//						printf("terminated by signal %d\n", WTERMSIG(childStatus));
-//						fflush(stdout);
-//						*status = 1;
-//					}
-//				} else {
-//					printf("background pid is %d\n", spawnPid);
-//					fflush(stdout);
-//				}
-//				break;
-//		}
-//	}
-//}
-
-void executeCommand(char** args, int argCount, int* lastStatus) {
-	pid_t pid = fork();
-	
-	if (pid == -1) {
-//		Fork Error
-  		perror("fork");
-  		exit(1);
-	} else if (pid == 0) {
-		
-		// In the child process
-		if (execvp(args[0], args) < 0) {
-			fprintf(stderr, "%s: command not found\n", args[0]);
-			fflush(stdout);
-			exit(1);
-		}
-		// exec only returns if there is an error
-		perror("execvp");
-		exit(2);
-	} else {
-		pid = waitpid(pid, lastStatus, 0);
-//		printf("PARENT(%d): child(%d) terminated. Exiting\n", getpid(), pid);
-	}
-}
-
 void runStatus(int lastStatus) {
 	if (WIFEXITED(lastStatus))
 		printf("exit value %d\n", WEXITSTATUS(lastStatus));
@@ -114,8 +35,81 @@ void runStatus(int lastStatus) {
 		printf("terminated by signal %d\n", WTERMSIG(lastStatus));
 }
 
+void executeCommand(char** args, int argCount, int* lastStatus, char* inputFile, char* outputFile, int background) {
+	// Fork for new process
+	pid_t pid = fork();
+	
+	if (pid == -1) {
+  		perror("fork() failed!");
+  		exit(1);
+	} else if (pid == 0) {
+		// Child process
+		
+		// Redirect input
+		if (inputFile != NULL) {
+			int iFd = open(inputFile, O_RDONLY);
+			if (iFd == -1) {
+				fprintf(stderr, "cannot open %s for input\n", inputFile);
+				fflush(stdout);
+				exit(1);
+			}
+			dup2(iFd, 0);
+			close(iFd);
+		}
+
+		// Redirect output
+		if (outputFile != NULL) {
+			int oFd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (oFd == -1) {
+				fprintf(stderr, "cannot open %s for output\n", outputFile);
+				fflush(stdout);
+				exit(1);
+			}
+			dup2(oFd, 1);
+			close(oFd);
+		}
+		
+		if (execvp(args[0], args) < 0) {
+			fprintf(stderr, "%s: no such file or directory\n", args[0]);
+			fflush(stdout);
+			exit(1);
+		}
+		// exec only returns if there is an error
+		perror("execvp");
+		exit(2);
+	} else {
+		// In the parent process
+//		pid = waitpid(pid, lastStatus, 0);
+		
+		if (!background) {
+			// Wait for child process to complete
+			pid = waitpid(pid, lastStatus, 0);
+		} else {
+			// Print background process ID
+			printf("background pid is %d\n", pid);
+			fflush(stdout);
+		}
+	}
+	
+	// Reset file descriptors
+	if (inputFile != NULL)
+		dup2(0, 0);
+
+	if (outputFile != NULL)
+		dup2(1, 1);
+	
+	if (background && WIFEXITED(*lastStatus)) {
+		// Print background process exit status
+		printf("background pid %d is done: ", pid);
+		runStatus(*lastStatus);
+		fflush(stdout);
+	}
+}
+
 int main(int argc, const char * argv[]) {
 	char line[MAX_CMD_LENGTH];
+	pid_t bgPids[200];
+	int numBgPids = 0;
 	
 	while(1) {
 		promptUser(line, MAX_CMD_LENGTH);
@@ -152,22 +146,20 @@ int main(int argc, const char * argv[]) {
 			token = strtok(NULL, " ");
 		}
 		
-		for (int i = 0; i < 3; i++) {
-			printf("%s\n", args[i]);
-		}
-		printf("Output: %s\n", inputFile);
-		printf("Input: %s\n", outputFile);
-
 		if (argCount == 0)
 			continue;
 		
 		// Handle built-in commands
 		if (strcmp(args[0], "exit") == 0) {
+			for (int i = 0; i < numBgPids; i++)
+				kill(bgPids[i], SIGKILL);
+//			checkbgpids(bgpids, &numbgpids, &status, true);
+//			When this command is run, your shell must kill any other processes or jobs that your shell has started before it terminates itself.
 			exit(0);
 		} else if (strcmp(args[0], "cd") == 0) {
 			if (argCount > 1) {
 				if (chdir(args[1])) {
-					printf("Could not find %s\n", args[1]);
+					fprintf(stderr, "Could not find %s\n", args[1]);
 					fflush(stdout);
 				}
 			} else {
@@ -176,13 +168,17 @@ int main(int argc, const char * argv[]) {
 		} else if (strcmp(args[0], "status") == 0) {
 			runStatus(lastStatus);
 		} else {
-			//		executeCommand(args, argCount, &status, &background);
-			executeCommand(args, argCount, &lastStatus);
+			executeCommand(args, argCount, &lastStatus, inputFile, outputFile, background);
+			
+//			if (!background) {
+//				pid_t pid = waitpid(-1, &lastStatus, 0);
+//				if (pid == -1) {
+//					perror("waitpid");
+//					exit(1);
+//				}
+//				runStatus(lastStatus);
+//			}
 		}
 	}
 	return 0;
 }
-
-
-// Good Idea:
-//Consider defining a struct in which you can store all the different elements included in a command. Then as you parse a command, you can set the value of members of a variable of this struct type.

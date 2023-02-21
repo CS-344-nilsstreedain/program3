@@ -179,9 +179,13 @@ void checkBg(int* bgPids, int* numBgPids, int* status, int terminate) {
  * @param flags The flags to use when opening the file
  * @param action The type of action being performed ("input" or "output")
  */
-void redirectIO(char* file, int redirFd, int flags, char* action) {
+void redirectIO(char* file, int bg, int redirFd, int flags, char* action) {
+	// If background process, override file to "/dev/null"
+	if (bg)
+		file = "/dev/null";
+	
 	// If file specified, open with given flags
-	if (file != NULL) {
+	if (file) {
 		int fd = open(file, flags, 0644);
 		
 		// Error on open() failure
@@ -216,13 +220,13 @@ void newProcess(struct command cmd, struct sigaction sa) {
 		// Default sig handler if not background process
 		if (!cmd.bg) {
 			sa.sa_handler = SIG_DFL;
-			sa.sa_flags = 0;
+//			sa.sa_flags = 0;
 			sigaction(SIGINT, &sa, NULL);
 		}
 		
 		// Redirect standard input/output
-		redirectIO(cmd.inFile, 0, O_RDONLY, "input");
-		redirectIO(cmd.outFile, 1, O_WRONLY | O_CREAT | O_TRUNC, "output");
+		redirectIO(cmd.inFile, cmd.bg, 0, O_RDONLY, "input");
+		redirectIO(cmd.outFile, cmd.bg, 1, O_WRONLY | O_CREAT | O_TRUNC, "output");
 		
 		// Execute command and print errors
 		execvp(cmd.args[0], cmd.args);
@@ -239,6 +243,8 @@ void newProcess(struct command cmd, struct sigaction sa) {
 		} else {
 			// Otherwise, wait for child process to complete
 			waitpid(pid, &lastStatus, 0);
+			if (!WIFEXITED(lastStatus))
+				runStatus(lastStatus);
 		}
 	}
 	

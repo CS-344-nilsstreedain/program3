@@ -23,8 +23,9 @@ After successful completion of this assignment, you should be able to do the fol
 Use the colon `:` symbol as a prompt for each command line. 
 
 The general syntax of a command line is:
-
-`command [arg1 arg2 ...] [< input_file] [> output_file] [&]`
+```
+command [arg1 arg2 ...] [< input_file] [> output_file] [&]
+```
 
 …where items in square brackets are optional.
 
@@ -228,7 +229,6 @@ You can choose any function in the `exec()` family. However, we suggest that usi
 We recommend that the needed input/output redirection should be done in the child process.
 
 Note that after using `dup2()` to set up the redirection, the redirection symbol and redirection destination/source are NOT passed into the exec command
-
 - For example, if the command given is `ls > junk`, then you handle the redirection to "junk" with `dup2()` and then simply pass `ls` into `exec()`.
 
 ### 7. Executing Commands in Foreground & Background
@@ -274,16 +274,17 @@ Once the program is compiled, according to your specifications given in README.t
 Here is the grading script [p3testscript](p3testscript). It is a bash script that starts the smallsh program and runs commands on smallsh's command line. Most of the commands run by the grading script are very similar to the commands shown in the section Sample Program Execution. You can open the script in a text editor. The comments in the script will show you the points for individual items. Use the script to prepare for your grade, as this is how it's being earned.
 
 To run the script, place it in the same directory as your compiled shell, chmod it (`chmod +x ./p3testscript`) and run this command from a bash prompt:
-
-`$ ./p3testscript 2>&1`
-
+```
+$ ./p3testscript 2>&1
+```
 or
-
-`$ ./p3testscript 2>&1 | more`
-
+```
+$ ./p3testscript 2>&1 | more
+```
 or
-
-`$ ./p3testscript > mytestresults 2>&1 `
+```
+$ ./p3testscript > mytestresults 2>&1
+```
 Do not worry if the spacing, indentation, or look of the output of the script is different than when you run it interactively: that won’t affect your grade. The script may add extra colons at the beginning of lines or do other weird things, like put output about terminating processes further down the script than you intended. 
 
 If your program does not work with the grading script, and you instead request that we grade your script by hand, we will apply a 15% reduction to your final score. So from the very beginning, make sure that you work with the grading script on our class server!
